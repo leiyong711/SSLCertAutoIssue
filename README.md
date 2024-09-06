@@ -1,7 +1,7 @@
 # SSLCertAutoIssue
-免费乏域名签发自动部署更新
+免费 乏域名 SSL证书 自动签发部署更新
 
-> Windows下可用的自动重新签发SSH证书脚本，支持泛域名
+> Windows下可用的自动重新签发SSL证书脚本，支持泛域名
 > 
 > 由于在 [Let's Encrypt](https://letsencrypt.osfipin.com/) 申请的证书有效期为90天，所以需要定时更新证书
 > 
