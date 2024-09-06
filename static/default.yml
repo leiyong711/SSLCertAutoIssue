@@ -1,0 +1,42 @@
+letsencrypt:  # https://letsencrypt.osfipin.com/  证书签发平台
+  api_host: https://api.xwamp.com # 证书签发平台域名
+  token: 64c******ac8d  # 证书签发Token (替换为自己的账号信息)
+  user_name: 176****674  # 登录用户名 (替换为自己的账号信息)
+
+qcloud: # 腾讯云解析DNS https://console.cloud.tencent.com/  API文档 https://cloud.tencent.com/document/api/1427/56189
+  secret_id: AKIDN5******d5OY # (替换为自己的账号信息)
+  secret_key: 76wcA******iU   #  (替换为自己的账号信息)
+
+nginx_config:   # HTTP验证Nginx配置
+  path: D:/Code2/nginx/conf/nginx.conf    # nginx配置文件路径
+  acme_challenge_pattern: /.well-known/acme-challenge/([a-zA-Z0-9_]+)  # acme challenge正则
+  acme_challenge_txt_pattern: return 200 "(.*?)"    # acme challenge txt正则
+
+domain_list:
+  jxzxgl@cn:
+    domain: j***l.cn
+    apply_for_days_in_advance: 3  # 提前申请天数
+    second_verification_method: DNS  # 二次验证方式 DNS/HTTP
+    dns_service_providers: Aliyun  # DNS服务商   (替换为自己的域名服务商解析)
+    ssl_deployment_path: D:/Code2/nginx/ssl/cn  # ssl部署路径   (替换为自己的SSL证书位置)
+
+  jxzxgl@xyz:
+    domain: j***l.xyz  #  (替换为自己的账号信息)
+    apply_for_days_in_advance: 3  # 提前申请天数
+    second_verification_method: DNS  # 二次验证方式 DNS/HTTP
+    dns_service_providers: Qcloud  # DNS服务商  (替换为自己的域名服务商解析)
+    ssl_deployment_path: D:/Code2/nginx/ssl/xyz  # ssl部署路径  (替换为自己的SSL证书位置)
+
+  leiyong711@top:
+    domain: le***1.top  #  (替换为自己的账号信息)
+    apply_for_days_in_advance: 3
+    second_verification_method: DNS  # 二次验证方式 DNS/HTTP
+    dns_service_providers: Qcloud  # DNS服务商  (替换为自己的域名服务商解析)
+    ssl_deployment_path: D:/Code2/nginx/ssl/top  # ssl部署路径 (替换为自己的SSL证书位置)
+
+we_chat_noti:  # 私有微信通知推送 (替换为自己的信息)
+  wx_noti_host: https://wxnoti.***.cn  # 私有微信通知平台域名
+  wx_token: 098f6******e832627b4f6 # 私有微信通知Token
+  wx_id: L*****ang  # 微信ID
+  wx_room_id: 2145*****@chatroom  # 微信群ID
+  wx_room_noti: true # 是否推送到微信群, 推送到群则不推送到微信个人(会在群中@对应人)
