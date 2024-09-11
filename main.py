@@ -17,6 +17,7 @@ from utils.wx_noti import send_wx_noti
 from datetime import datetime, timedelta
 from app.letsencrypt.api import LetsencryptAPI
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.events import EVENT_JOB_MISSED, EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
 
 
@@ -132,6 +133,8 @@ def verify_the_certificate(**kwargs):
                         # 腾讯云DNS解析
                         if dns_service_providers == "Qcloud":
                             dns_updata_status = qcloud.modify_the_specified_dns_record(v['domain'], '_acme-challenge', verify['check']['dns-01']['txt'])
+                        else:
+                            lg.error(f"域名 {v['domain']} 暂不支持 {dns_service_providers} DNS服务商，请选择其他DNS服务商")
 
                         # 修改DNS失败
                         if not dns_updata_status:
@@ -163,6 +166,8 @@ def verify_the_certificate(**kwargs):
                             # 腾讯云DNS解析
                             if dns_service_providers == "Qcloud":
                                 dns_updata_status = qcloud.modify_the_specified_dns_record(v['domain'], '_acme-challenge', verify['check']['dns-01']['txt'])
+                            else:
+                                lg.error(f"域名 {v['domain']} 暂不支持 {dns_service_providers} DNS服务商，请选择其他DNS服务商")
 
                             # 修改DNS失败
                             if not dns_updata_status:
@@ -217,11 +222,26 @@ def verify_the_certificate(**kwargs):
                 lg.warning(f"域名 {v['domain']} 证书申请失败，请手动申请，错误信息为：{text}")
 
 
+# 配置 APScheduler 事件监听器
+def apscheduler_logger(event):
+    if event.exception:
+        lg.error(f"APScheduler event: {event.code} - {event.exception}")
+    elif event.code == EVENT_JOB_MISSED:
+        lg.warning(f"APScheduler event: {event.code} - Job missed")
+    elif event.code == EVENT_JOB_EXECUTED:
+        lg.info(f"APScheduler event: {event.code} - Job executed")
+    elif event.code == EVENT_JOB_ERROR:
+        lg.error(f"APScheduler event: {event.code} - Job error")
+
 def main():
-    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验证"}, replace_existing=True, run_date=datetime.now() + timedelta(seconds=3))
-    scheduler.add_job(verify_the_certificate, 'cron', kwargs={"job_name": "每日定时验证证书是否过期"}, hour=12, minute=30)
-    lg.info("开始执行任务")
-    scheduler.start()
+    try:
+        scheduler.add_listener(apscheduler_logger, EVENT_JOB_MISSED | EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
+        scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验证"}, replace_existing=True, run_date=datetime.now() + timedelta(seconds=3))
+        scheduler.add_job(verify_the_certificate, 'cron', id='定时验证证书', kwargs={"job_name": "每日定时验证证书是否过期"}, hour=12, minute=30)
+        lg.info("开始执行任务")
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
 
 
 if __name__ == '__main__':
