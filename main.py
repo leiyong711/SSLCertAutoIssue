@@ -239,7 +239,7 @@ def main():
     try:
         scheduler.add_listener(apscheduler_logger, EVENT_JOB_MISSED | EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
         scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验证"}, replace_existing=True, run_date=datetime.now() + timedelta(seconds=3))
-        scheduler.add_job(verify_the_certificate, 'cron', id='定时验证证书', kwargs={"job_name": "每日定时验证证书是否过期"}, hour=12, minute=30)
+        scheduler.add_job(verify_the_certificate, 'cron', id='定时验证证书', kwargs={"job_name": "每日定时验证证书是否过期"}, hour=12, minute=30, misfire_grace_time=180)
         lg.info("开始执行任务")
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
