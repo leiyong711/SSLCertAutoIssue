@@ -7,6 +7,7 @@
 
 import os
 import re
+import time
 import traceback
 from utils.log import lg
 from utils.config import Config
@@ -37,7 +38,7 @@ def http_validation(acme_challenge: str, txt: str):
     nginx_config = ""
     try:
         try:
-            with open(nginx_config_path, 'r') as f:
+            with open(nginx_config_path, 'r', encoding='utf-8') as f:
                 nginx_config = f.read()
         except Exception as e:
             lg.error(f"读取 Nginx 配置文件错误，原因:\n{traceback.format_exc()}")
@@ -57,7 +58,7 @@ def http_validation(acme_challenge: str, txt: str):
         nginx_config = nginx_config.replace(old_acme_challenge, acme_challenge, 1)
         nginx_config = nginx_config.replace(old_txt, txt, 1)
 
-        with open('new_'+ nginx_config_path, 'w') as f:
+        with open(nginx_config_path, 'w') as f:
             f.write(nginx_config)
 
         return True
@@ -105,7 +106,13 @@ def verify_the_certificate(**kwargs):
                 let_api.deploy_ssl(zip_file_path, v['domain'])  # 部署证书
                 lg.info(f"域名 {v['domain']} SSL证书部署完成，请检查域名是否正常访问")
                 send_wx_noti(f"域名 {v['domain']} SSL证书部署完成，请检查域名是否正常访问", types="success")
-
+                
+                lg.info(f"新证书配置成功，重启Nginx生效，即将停止 Nginx 服务")
+                os.system('net stop nginx')
+                time.sleep(6)
+                os.system('net start nginx')
+                lg.info(f"新证书配置成功，重启Nginx生效，开始启动 Nginx 服务")
+                return
             # SSL证书即将过期
             if days_difference <= apply_for_days_in_advance:
 
