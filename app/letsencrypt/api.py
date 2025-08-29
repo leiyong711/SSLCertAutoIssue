@@ -211,7 +211,11 @@ class LetsencryptAPI:
         if types:
             params.update({"type": types})
         r = self.request(url='/api/user/OrderDetail/down', params=params, resp="File")
-        if r.headers.get('Content-Type', '') != "application/zip; charset=utf-8":
+        # lg.debug(r.headers)
+        # if r.headers.get('Content-Type', '') != "application/zip; charset=utf-8":
+        #     return ""
+        if r.status_code != 200:
+            lg.error(f"证书下载失败，原因: {r.text}")
             return ""
 
         # 判断文件夹是否存在否，不存在则创建
@@ -245,6 +249,6 @@ class LetsencryptAPI:
 
 if __name__ == '__main__':
     api = LetsencryptAPI()
-    data = api.certificate_details('1mj9ko')
-    # data = api.account_info()
+    # data = api.certificate_details('1mj9ko')
+    data = api.certificate_download('1mj9ko')
     lg.debug(data)
