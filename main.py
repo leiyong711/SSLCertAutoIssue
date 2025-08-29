@@ -38,8 +38,12 @@ def http_validation(acme_challenge: str, txt: str):
     nginx_config = ""
     try:
         try:
-            with open(nginx_config_path, 'r', encoding='utf-8') as f:
-                nginx_config = f.read()
+            try:
+                with open(nginx_config_path, 'r', encoding='utf-8') as f:
+                    nginx_config = f.read()
+            except UnicodeDecodeError as e:
+                with open(nginx_config_path, 'r', encoding='gbk') as f:
+                    nginx_config = f.read()
         except Exception as e:
             lg.error(f"读取 Nginx 配置文件错误，原因:\n{traceback.format_exc()}")
 
