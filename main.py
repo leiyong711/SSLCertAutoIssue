@@ -7,6 +7,7 @@
 
 import os
 import re
+import time
 import traceback
 from utils.log import lg
 from utils.config import Config
@@ -37,7 +38,7 @@ def http_validation(acme_challenge: str, txt: str):
     nginx_config = ""
     try:
         try:
-            with open(nginx_config_path, 'r') as f:
+            with open(nginx_config_path, 'r', encoding='utf-8') as f:
                 nginx_config = f.read()
         except Exception as e:
             lg.error(f"读取 Nginx 配置文件错误，原因:\n{traceback.format_exc()}")
@@ -57,7 +58,7 @@ def http_validation(acme_challenge: str, txt: str):
         nginx_config = nginx_config.replace(old_acme_challenge, acme_challenge, 1)
         nginx_config = nginx_config.replace(old_txt, txt, 1)
 
-        with open('new_'+ nginx_config_path, 'w') as f:
+        with open(nginx_config_path, 'w') as f:
             f.write(nginx_config)
 
         return True
@@ -72,33 +73,59 @@ def verify_the_certificate(**kwargs):
     try:
         # 获取SSL证书列表
         order_list = let_api.order_list()
+        # lg.debug(order_list)
+        
+        # 检查order_list是否为空或无效
+        if not order_list:
+            lg.error("获取SSL证书列表失败，API返回空数据")
+            return
+            
         let_order_lists = {i['domains'][0].replace("*.", ""): i for i in order_list}
+        # lg.debug(let_order_lists)
 
         # 获取域名配置文件列表
         domain_lists = config.get_jsonpath("$.domain_list", {})
         for k, v in domain_lists.items():
 
+            k = kwargs.get('k') if kwargs.get('k', '') else k
+            v = kwargs.get('v') if kwargs.get('v', {}) else v
+
             # 排除SSL证书平台与配置文件中的不一致域名
             cert_id = let_order_lists.get(v['domain'], {}).get('id', '')
             if not cert_id:
+                lg.warning(f"域名 {v['domain']} 在SSL证书平台中未找到对应的证书ID")
                 continue
 
             # 获取SSL证书详情
             order_info = let_api.certificate_details(cert_id)
+            
+            # 检查order_info是否为空或无效
+            if not order_info:
+                lg.error(f"获取域名 {v['domain']} 的SSL证书详情失败，API返回空数据")
+                continue
+                
+            # 检查time_end字段是否存在
+            if 'time_end' not in order_info:
+                lg.error(f"域名 {v['domain']} 的SSL证书详情中缺少time_end字段，order_info: {order_info}")
+                continue
 
             # 过期时间
-            expiration_time = datetime.strptime(order_info['time_end'], '%Y-%m-%d %H:%M:%S')
-            time_difference = expiration_time - datetime.now()
-            days_difference = time_difference.days
-            lg.info(f"域名 {v['domain']} SSL证书距离过期剩余 {days_difference} 天")
+            try:
+                expiration_time = datetime.strptime(order_info['time_end'], '%Y-%m-%d %H:%M:%S')
+                time_difference = expiration_time - datetime.now()
+                days_difference = time_difference.days
+                lg.info(f"域名 {v['domain']} SSL证书距离过期剩余 {days_difference} 天")
+            except (ValueError, TypeError) as e:
+                lg.error(f"解析域名 {v['domain']} 的证书过期时间失败: {e}, time_end: {order_info.get('time_end')}")
+                continue
 
-            lg.debug(f"order_info: {order_info}")
+            # lg.debug(f"order_info: {order_info}")
 
             # SSL证书提前续申请天数
             apply_for_days_in_advance = v.get("apply_for_days_in_advance", 3)
 
             # SSL证书验证通过
-            if order_info.get('status') == "完成" and days_difference > apply_for_days_in_advance and kwargs.get('job_name') == 'SSL证书验签中，重新获取 所有权 验证结果':
+            if order_info.get('status_name') == "完成" and days_difference > apply_for_days_in_advance and kwargs.get('job_name') == 'SSL证书验签中，重新获取 所有权 验证结果':
                 send_wx_noti(f"域名 {v['domain']} SSL证书验证通过，开始准备下载部署")
                 lg.info(f"域名 {v['domain']} SSL证书验证通过，开始准备下载部署")
                 zip_file_path = let_api.certificate_download(cert_id=cert_id)    # 下载证书
@@ -106,15 +133,21 @@ def verify_the_certificate(**kwargs):
                 lg.info(f"域名 {v['domain']} SSL证书部署完成，请检查域名是否正常访问")
                 send_wx_noti(f"域名 {v['domain']} SSL证书部署完成，请检查域名是否正常访问", types="success")
 
+                lg.info(f"新证书配置成功，重启Nginx生效，即将停止 Nginx 服务")
+                os.system('net stop nginx')
+                time.sleep(6)
+                os.system('net start nginx')
+                lg.info(f"新证书配置成功，重启Nginx生效，开始启动 Nginx 服务")
+                return
             # SSL证书即将过期
             if days_difference <= apply_for_days_in_advance:
 
-                if order_info.get('status') == "验证中":
+                if order_info.get('status_name') == "验证中":
                     lg.info(f"域名 {v['domain']} SSL证书正处于验证中状态，三分钟后重新检测验签结果")
-                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                     return
 
-                elif order_info.get('status') == "待验证":
+                elif order_info.get('status_name') == "待验证":
                     lg.info(f"域名 {v['domain']} SSL证书正处于 待验证 状态")
 
                     for verify in order_info['verify_data']:
@@ -139,14 +172,14 @@ def verify_the_certificate(**kwargs):
                             # 修改DNS失败
                             if not dns_updata_status:
                                 send_wx_noti(f"域名 {v['domain']} DNS 所有权验证，修改 {dns_service_providers} DNS 解析失败，请检查域名解析是否正确", types="error")
-                                scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                                scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                                 return
 
                             lg.info(f"域名 {v['domain']} 即将开始进行 DNS 所有权验证")
                             status = let_api.certificate_validation(cert_id, f"{verify['id']}:{verify['check']['dns-01']['type']}")
                             if status:
                                 send_wx_noti(f"域名 {v['domain']} 开始进行 DNS 所有权验证")
-                                scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                                scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                                 return
 
                         elif len(verify['check']) == 2:  # 同时有DNS和HTTP验证
@@ -179,7 +212,7 @@ def verify_the_certificate(**kwargs):
                                 status = let_api.certificate_validation(cert_id, f"{verify['id']}:{verify['check']['dns-01']['type']}")
                                 if status:
                                     send_wx_noti(f"域名 {v['domain']} 开始进行二次 DNS 所有权验证")
-                                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                                     return
 
                             elif second_verification_method == 'HTTP':
@@ -191,7 +224,7 @@ def verify_the_certificate(**kwargs):
                                 # 修改 Nginx 配置
                                 if not http_validation(verify['check']['http-01']['filename'], verify['check']['http-01']['content']):
                                     send_wx_noti(f"域名 {v['domain']} HTTP 所有权验证，修改 Nginx 配置文件失败", types="error")
-                                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                                     return
 
                                 os.system('net start nginx')
@@ -201,7 +234,7 @@ def verify_the_certificate(**kwargs):
                                 status = let_api.certificate_validation(cert_id, f"{verify['id']}:{verify['check']['http-01']['type']}")
                                 if status:
                                     send_wx_noti(f"域名 {v['domain']} 开始进行 HTTP 所有权验证")
-                                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                                     return
                             else:
                                 lg.error(f"域名 {v['domain']} 二次所有权验证方式配置错误")
@@ -215,11 +248,13 @@ def verify_the_certificate(**kwargs):
                 if status:
                     send_wx_noti(f"域名 {v['domain']} SSL证书即将过期，剩余天数为 {days_difference} 天，开始尝试自动申请新的证书", types="warning")
                     lg.info(f"域名 {v['domain']} 证书即将过期，开始申请新的证书")
-                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
+                    scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"k": k, "v": v, "job_name": "SSL证书验签中，重新获取 所有权 验证结果"}, replace_existing=True, run_date=datetime.now() + timedelta(minutes=3))
                     return
                 else:
                     send_wx_noti(f"域名 {v['domain']} 证书申请失败，请手动申请，错误信息为：{text}", types="error")
                     lg.warning(f"域名 {v['domain']} 证书申请失败，请手动申请，错误信息为：{text}")
+    except Exception as e:
+        lg.error(f"验证SSL证书时发生异常: {traceback.format_exc()}")
     finally:
         lg.info("任务执行完毕")
 
@@ -229,21 +264,44 @@ def apscheduler_logger(event):
     if event.exception:
         lg.error(f"APScheduler event: {event.code} - {event.exception}")
     elif event.code == EVENT_JOB_MISSED:
-        lg.warning(f"APScheduler event: {event.code} - Job missed")
+        lg.warning(f"APScheduler event: {event.code} - 错过了工作")
     elif event.code == EVENT_JOB_EXECUTED:
-        lg.info(f"APScheduler event: {event.code} - Job executed")
+        lg.info(f"APScheduler event: {event.code} - 已执行作业")
     elif event.code == EVENT_JOB_ERROR:
-        lg.error(f"APScheduler event: {event.code} - Job error")
+        lg.error(f"APScheduler event: {event.code} - 作业错误")
 
 def main():
     try:
         scheduler.add_listener(apscheduler_logger, EVENT_JOB_MISSED | EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
-        scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验证"}, replace_existing=True, run_date=datetime.now() + timedelta(seconds=3))
+        
+        # 添加初始任务，10秒后执行
+        scheduler.add_job(verify_the_certificate, 'date', id='验证证书', kwargs={"job_name": "SSL证书验证"}, replace_existing=True, run_date=datetime.now() + timedelta(seconds=10))
+        
+        # 添加每日定时任务，每天12:30执行
         scheduler.add_job(verify_the_certificate, 'cron', id='定时验证证书', kwargs={"job_name": "每日定时验证证书是否过期"}, hour=12, minute=30, misfire_grace_time=180)
+        
         lg.info("开始执行任务")
+        lg.info("定时任务已配置：每天12:30执行证书验证")
+        
+        # 启动调度器
         scheduler.start()
+        
     except (KeyboardInterrupt, SystemExit):
+        lg.info("收到退出信号，正在关闭调度器...")
         scheduler.shutdown()
+        lg.info("调度器已关闭")
+    except Exception as e:
+        lg.error(f"调度器启动失败: {e}")
+        lg.error(traceback.format_exc())
+        # 尝试重新启动
+        try:
+            lg.info("尝试重新启动调度器...")
+            scheduler.shutdown()
+            time.sleep(5)
+            main()
+        except Exception as restart_error:
+            lg.error(f"重新启动失败: {restart_error}")
+            raise
 
 
 if __name__ == '__main__':

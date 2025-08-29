@@ -4,6 +4,8 @@
 # author: "Lei Yong" 
 # creation time: 2024-09-03 16:47
 # Email: leiyong711@163.com
+from utils.config import Config
+config = Config(True)
 
 import os
 import math
@@ -14,7 +16,7 @@ from utils.log import lg
 from utils.config import Config
 from utils.constants import APP_PATH
 
-config = Config()
+# config = Config()
 
 
 class LetsencryptAPI:
@@ -29,18 +31,37 @@ class LetsencryptAPI:
             "Authorization": f"Bearer {self.token}:{self.user_name}"
         }
         try:
+            response = requests.request(method, self.api_host + url, headers=self.headers, timeout=5, **kwargs)
+            
+            # 记录响应状态和内容用于调试
+            # lg.debug(f"API请求: {method} {self.api_host + url}")
+            # lg.debug(f"响应状态码: {response.status_code}")
+            # lg.debug(f"响应内容: {response.text[:500]}...")  # 只记录前500个字符
+            
             if resp == 'File':
-                return requests.request(method, self.api_host + url, headers=self.headers, timeout=5, **kwargs)
-            return requests.request(method, self.api_host + url, headers=self.headers, timeout=5, **kwargs).json()
+                return response
+                
+            # 尝试解析JSON
+            try:
+                return response.json()
+            except requests.exceptions.JSONDecodeError as e:
+                lg.error(f"JSON解析失败: {e}")
+                lg.error(f"响应内容: {response.text}")
+                return {}
+                
+        except requests.exceptions.RequestException as e:
+            lg.error(f"网络请求异常: {e}")
+            return {}
         except Exception as e:
             lg.error(f"Letsencrypt request error: {traceback.format_exc()}")
             return {}
 
     def account_info(self) -> dict:
         """账户信息"""
-        r = self.request(url='/letsencrypt/api/account/info')
-        if r.get('c', 50) == 20 and r.get('m', '') == 'ok':
-            data = r.get('v', {})
+        r = self.request(url='/api/user/Account/info')
+        # lg.warning(r)
+        if not r.get('isError', True) and r.get('isOk', False):
+            data = r.get('data', {})
             text = f"\n账户信息\n" \
                    f"用户类型：{data.get('user_type', '')}\n" \
                    f"邮箱：{data.get('email', '')}\n" \
@@ -64,12 +85,13 @@ class LetsencryptAPI:
         pnum = 10
         domain_list = []
         while mpage <= math.ceil(all / pnum):
-            r = self.request(url='/letsencrypt/api/order/list', params={"page": mpage})
-            if r.get('c', 50) == 20 and r.get('m', '') == 'ok':
+            r = self.request(url='/api/user/Order/list', params={"page": mpage})
+            # lg.debug(r)
+            if not r.get('isError', True) and r.get('isOk', False):
                 mpage += 1
-                all = r.get('v', {}).get('all', 1)
-                pnum = r.get('v', {}).get('pnum', 10)
-                domain_list.extend(r.get('v', {}).get('list', []))
+                all = r.get('data', {}).get('all', 1)
+                pnum = r.get('data', {}).get('pnum', 10)
+                domain_list.extend(r.get('data', {}).get('list', []))
             else:
                 break
         # for i in domain_list:
@@ -82,7 +104,7 @@ class LetsencryptAPI:
         #            f"状态: {i.get('status')}\n" \
         #            f"自动状态: {i.get('auto_status')}\n" \
         #            f"是否使用独立通道: {i.get('quicker')}"
-            # lg.debug(text)
+        # lg.debug(text)
         return domain_list
 
     def certificate_application(self, domains: str, algorithm: str = 'RSA', quick: str = 'no', ca: str = 'lets') -> str:
@@ -100,10 +122,10 @@ class LetsencryptAPI:
             "quick": quick,
             "ca": ca
         }
-        r = self.request(url=f'/letsencrypt/api/order/apply', params=params)
-        lg.debug(r)
-        if r.get('c', 50) == 20 and r.get('m', '') == 'ok':
-            return r.get('v', {})
+        r = self.request(url=f'/api/user/Order/apply', params=params)
+        # lg.debug(r)
+        if not r.get('isError', True) and r.get('isOk', False):
+            return r.get('data', {})
         return ""
 
     def certificate_reapplication(self, cert_id: str) -> str:
@@ -112,10 +134,10 @@ class LetsencryptAPI:
         :param cert_id: 证书ID
         :return: 证书ID
         """
-        r = self.request(url='/letsencrypt/api/order/renew', params={"id": cert_id})
-        if r.get('c', 50) == 20 and r.get('m', '') == 'ok':
-            return True, r.get('v', {})
-        return False, r.get('m', '')
+        r = self.request(url='/api/user/OrderDetail/renew', params={"id": cert_id})
+        if not r.get('isError', True) and r.get('isOk', False):
+            return True, r.get('data', {})
+        return False, r.get('error', '')
 
     def certificate_details(self, cert_id: str) -> dict:
         """
@@ -123,9 +145,10 @@ class LetsencryptAPI:
         :param cert_id:
         :return: 验证信息 状态为需要验证时显示
         """
-        r = self.request(url='/letsencrypt/api/order/detail', params={"id": cert_id})
-        if r.get('c', 50) == 20 and r.get('m', '') == 'ok':
-            data = r.get('v', {})
+        r = self.request(url='/api/user/OrderDetail/info', params={"id": cert_id})
+        # lg.debug(r)
+        if not r.get('isError', True) and r.get('isOk', False):
+            data = r.get('data', {})
             text = f"\n证书详情\n" \
                    f"证书ID: {data.get('id')}\n" \
                    f"域名清单：{data.get('domains', '')}\n" \
@@ -147,7 +170,7 @@ class LetsencryptAPI:
             verify_data = data.get('verify_data', [])
 
             for i in verify_data:
-                lg.debug(i['check'])
+                # lg.debug(i['check'])
                 text += f"验证信息，状态为需要验证时显示\n" \
                         f"\t验证的域名：{i.get('domain', '')}\n" \
                         f"\t提交域名验证时标识，手动验证时显示：{i.get('id', '')}\n" \
@@ -161,7 +184,7 @@ class LetsencryptAPI:
                 text += f"\t设置解析的完整域名：{i.get('dns', '')}\n" \
                         f"\t设置CNAME解析的具体内容：{i.get('txt', '')}\n"
             # lg.debug(text)
-            return r.get('v', {})
+            return r.get('data', {})
         return {}
 
     def certificate_validation(self, cert_id: str, set: str = "123:dns-01;124:http-01"):
@@ -175,8 +198,8 @@ class LetsencryptAPI:
             "id": cert_id,
             "set": set
         }
-        r = self.request(url='/letsencrypt/api/order/verify', params=params)
-        if r.get('c', 50) == 20 and r.get('m', '') == 'ok' and r.get('v', '') == '提交成功,验证中':
+        r = self.request(url='/api/user/OrderDetail/verify', params=params)
+        if not r.get('isError', True) and r.get('isOk', False) and r.get('msg', '') == '提交成功,验证中':
             return True
         return False
 
@@ -187,7 +210,7 @@ class LetsencryptAPI:
         }
         if types:
             params.update({"type": types})
-        r = self.request(url='/letsencrypt/api/order/down', params=params, resp="File")
+        r = self.request(url='/api/user/OrderDetail/down', params=params, resp="File")
         if r.headers.get('Content-Type', '') != "application/zip; charset=utf-8":
             return ""
 
@@ -219,3 +242,9 @@ class LetsencryptAPI:
         except:
             ...
 
+
+if __name__ == '__main__':
+    api = LetsencryptAPI()
+    data = api.certificate_details('1mj9ko')
+    # data = api.account_info()
+    lg.debug(data)
