@@ -15,6 +15,7 @@ import traceback
 from utils.log import lg
 from utils.config import Config
 from utils.constants import APP_PATH
+from utils.user_limiter import user_limiter
 
 # config = Config()
 
@@ -27,6 +28,16 @@ class LetsencryptAPI:
         self.user_name = config.get_jsonpath("$.letsencrypt.user_name", "")
 
     def request(self, url, method='GET', resp='JSON', **kwargs):
+        # 检查用户限制（包括自动等待并发限制）
+        limit_ok, limit_msg = user_limiter.check_all_limits(self.user_name)
+        if not limit_ok:
+            lg.error(f"用户限制检查失败: {limit_msg}")
+            return {'isError': True, 'error': limit_msg, 'isOk': False}
+        
+        # 记录限制检查结果
+        if "等待" in limit_msg:
+            lg.info(f"用户限制检查: {limit_msg}")
+        
         self.headers = {
             "Authorization": f"Bearer {self.token}:{self.user_name}"
         }
@@ -76,7 +87,8 @@ class LetsencryptAPI:
                    f"短信数量：{data.get('num_sms', '')}\n" \
                    f"独立通道数量：{data.get('num_channel', '')}\n"
             # lg.info(text)
-        return data
+            return data
+        return {}
 
     def order_list(self) -> list:
         """证书列表"""
@@ -226,6 +238,23 @@ class LetsencryptAPI:
             f.write(r.content)
             lg.info(f"证书下载成功！保存路径：{APP_PATH}/temp/{cert_id}.zip")
         return f"{APP_PATH}/temp/{cert_id}.zip"
+
+    def get_user_limit_stats(self) -> dict:
+        """获取用户限制统计信息"""
+        stats = user_limiter.get_user_stats(self.user_name)
+        
+        # 尝试获取账户信息以确定用户类型
+        try:
+            account_data = self.account_info()
+            if account_data:
+                user_type = account_data.get('user_type', 'normal')
+                # 更新用户限制器中的用户类型
+                user_limiter.set_user_type(self.user_name, user_type)
+                stats['user_type'] = user_type
+        except Exception as e:
+            lg.warning(f"获取账户信息失败，使用默认用户类型: {e}")
+        
+        return stats
 
     def deploy_ssl(self, zipfile_path, domain):
         """

@@ -2,6 +2,7 @@ letsencrypt:  # https://letsencrypt.osfipin.com/  证书签发平台
   api_host: https://api.xwamp.com # 证书签发平台域名
   token: 64c******ac8d  # 证书签发Token (替换为自己的账号信息)
   user_name: 176****674  # 登录用户名 (替换为自己的账号信息)
+  user_type: normal  # 用户类型: normal(普通用户), vip(VIP用户), svip(SVIP用户)
 
 qcloud: # 腾讯云解析DNS https://console.cloud.tencent.com/  API文档 https://cloud.tencent.com/document/api/1427/56189
   secret_id: AKIDN5******d5OY # (替换为自己的账号信息)
